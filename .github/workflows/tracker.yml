@@ -90,9 +90,10 @@ jobs:
   log:
     if: github.event_name == 'issues' && !github.event.issue.pull_request && github.event.changes.body && contains(github.event.issue.title, '/')
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     concurrency:
       group: log-${{ github.event.issue.number }}
-      cancel-in-progress: false
+      cancel-in-progress: true
     steps:
       - uses: actions/github-script@v7
         with:
