@@ -1,0 +1,120 @@
+name: Tracker
+on:
+  schedule:
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+  push:
+    paths: [students.txt]
+  issues:
+    types: [edited]
+permissions:
+  contents: write
+  issues: write
+concurrency: tracker
+jobs:
+  sync:
+    if: github.event_name != 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const render = (dirs, done) => {
+              const n = dirs.filter(d => done.has(d)).length;
+              const t = dirs.length;
+              const p = t ? Math.round(n / t * 100) : 0;
+              const bar = '█'.repeat(Math.round(p / 5)).padEnd(20, '░');
+              const list = dirs.map(d => `- [${done.has(d) ? 'x' : ' '}] ${d}`).join('\n');
+              return `**${n} / ${t} done (${p}%)**\n\`${bar}\`\n\n${list}`;
+            };
+            const students = fs.readFileSync('students.txt', 'utf8').split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+            const log = fs.existsSync('progress.json') ? JSON.parse(fs.readFileSync('progress.json', 'utf8')) : {};
+            const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 });
+            for (const s of students) {
+              const [owner, repo] = s.split('/');
+              let items;
+              try {
+                ({ data: items } = await github.rest.repos.getContent({ owner, repo, path: '' }));
+              } catch (e) {
+                core.warning(`skip ${s}`);
+                continue;
+              }
+              const dirs = items
+                .filter(i => i.type === 'dir' && !i.name.startsWith('.'))
+                .map(i => i.name)
+                .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+              const existing = issues.find(i => i.title === s && !i.pull_request);
+              const done = new Set(Object.keys(log[s] || {}));
+              if (existing && existing.body) {
+                for (const m of existing.body.matchAll(/- \[x\] (.+)/gi)) done.add(m[1].trim());
+              }
+              const body = render(dirs, done);
+              if (!existing) {
+                await github.rest.issues.create({ ...context.repo, title: s, body });
+              } else if (existing.body !== body) {
+                await github.rest.issues.update({ ...context.repo, issue_number: existing.number, body });
+              }
+            }
+  log:
+    if: github.event_name == 'issues' && !github.event.issue.pull_request && github.event.changes.body && contains(github.event.issue.title, '/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: update
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const parse = t => {
+              const s = new Set();
+              for (const m of (t || '').matchAll(/- \[x\] (.+)/gi)) s.add(m[1].trim());
+              return s;
+            };
+            const issue = context.payload.issue;
+            const key = issue.title;
+            const before = parse(context.payload.changes.body.from);
+            const after = parse(issue.body);
+            const ticked = [...after].filter(x => !before.has(x));
+            const unticked = [...before].filter(x => !after.has(x));
+            if (!ticked.length && !unticked.length) {
+              core.setOutput('changed', 'false');
+              return;
+            }
+            const who = context.payload.sender.login;
+            const now = new Date();
+            const ist = now.toLocaleString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              day: '2-digit', month: 'short', year: 'numeric',
+              hour: '2-digit', minute: '2-digit', hour12: true
+            });
+            const log = fs.existsSync('progress.json') ? JSON.parse(fs.readFileSync('progress.json', 'utf8')) : {};
+            log[key] = log[key] || {};
+            for (const q of ticked) log[key][q] = { by: who, at: now.toISOString() };
+            for (const q of unticked) delete log[key][q];
+            fs.writeFileSync('progress.json', JSON.stringify(log, null, 2) + '\n');
+            const lines = issue.body.split('\n').filter(l => /^- \[[ x]\] /i.test(l));
+            const t = lines.length;
+            const n = lines.filter(l => /^- \[x\]/i.test(l)).length;
+            const p = t ? Math.round(n / t * 100) : 0;
+            const bar = '█'.repeat(Math.round(p / 5)).padEnd(20, '░');
+            await github.rest.issues.update({
+              ...context.repo,
+              issue_number: issue.number,
+              body: `**${n} / ${t} done (${p}%)**\n\`${bar}\`\n\n${lines.join('\n')}`
+            });
+            const parts = [];
+            if (ticked.length) parts.push(ticked.join(', ') + ' ticked');
+            if (unticked.length) parts.push(unticked.join(', ') + ' unticked');
+            core.setOutput('changed', 'true');
+            core.setOutput('msg', `${key}: ${parts.join(' | ')} by ${who} at ${ist} IST`);
+      - if: steps.update.outputs.changed == 'true'
+        env:
+          MSG: ${{ steps.update.outputs.msg }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add progress.json
+          git commit -m "$MSG"
+          git push
