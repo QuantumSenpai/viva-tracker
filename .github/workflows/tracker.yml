@@ -45,7 +45,8 @@ jobs:
                 .filter(i => i.type === 'dir' && !i.name.startsWith('.'))
                 .map(i => i.name)
                 .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-              const existing = issues.find(i => i.title === s && !i.pull_request);
+              const found = issues.find(i => i.title === s && !i.pull_request);
+              const existing = found ? (await github.rest.issues.get({ ...context.repo, issue_number: found.number })).data : null;
               const done = new Set(Object.keys(log[s] || {}));
               if (existing && existing.body) {
                 for (const m of existing.body.matchAll(/- \[x\] (.+)/gi)) done.add(m[1].trim());
@@ -53,7 +54,7 @@ jobs:
               const body = render(dirs, done);
               if (!existing) {
                 await github.rest.issues.create({ ...context.repo, title: s, body });
-              } else if (existing.body !== body) {
+              } else if (existing.body.replace(/\r\n/g, '\n') !== body) {
                 await github.rest.issues.update({ ...context.repo, issue_number: existing.number, body });
               }
             }
@@ -67,21 +68,20 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const issue = context.payload.issue;
-            const key = issue.title;
+            const key = context.payload.issue.title;
             const who = context.payload.sender.login;
             const now = new Date();
-            const lines = issue.body.split('\n').filter(l => /^- \[[ x]\] /i.test(l));
+            const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: context.payload.issue.number });
+            const lines = issue.body.split('\n').map(l => l.replace(/\r$/, '')).filter(l => /^- \[[ x]\] /i.test(l));
             const checked = lines.filter(l => /^- \[x\]/i.test(l)).map(l => l.replace(/^- \[x\] /i, '').trim());
             const t = lines.length;
             const n = checked.length;
             const p = t ? Math.round(n / t * 100) : 0;
             const bar = '█'.repeat(Math.round(p / 5)).padEnd(20, '░');
-            await github.rest.issues.update({
-              ...context.repo,
-              issue_number: issue.number,
-              body: `**${n} / ${t} done (${p}%)**\n\`${bar}\`\n\n${lines.join('\n')}`
-            });
+            const body = `**${n} / ${t} done (${p}%)**\n\`${bar}\`\n\n${lines.join('\n')}`;
+            if (body !== issue.body.replace(/\r\n/g, '\n')) {
+              await github.rest.issues.update({ ...context.repo, issue_number: issue.number, body });
+            }
             const ist = now.toLocaleString('en-IN', {
               timeZone: 'Asia/Kolkata',
               day: '2-digit', month: 'short', year: 'numeric',
