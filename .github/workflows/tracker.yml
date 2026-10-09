@@ -21,7 +21,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const CODE = /\.(c|cpp|cc|cxx|h|hpp|py|ipynb|java|js|ts|go|rs|cs|kt|rb|php|sql)$/i;
+            const IGNORE = new Set(['md', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'zip', 'rar', '7z', 'tar', 'gz', 'exe', 'out', 'o', 'obj', 'class', 'dll', 'so', 'a', 'lib', 'jar', 'log', 'yml', 'yaml', 'json', 'lock', 'toml', 'ini', 'cfg', 'gitignore', 'gitattributes']);
             const SKIP = new Set(['node_modules', 'venv', 'env', '__pycache__', 'build', 'dist', 'bin', 'obj', 'vendor', 'target', 'out']);
             const pick = paths => {
               let prefix = '';
@@ -32,7 +32,8 @@ jobs:
                   const parts = p.slice(prefix.length).split('/');
                   const dirs = parts.slice(0, -1);
                   const file = parts[parts.length - 1];
-                  if (!CODE.test(file) || file.startsWith('.') || dirs.some(d => d.startsWith('.') || SKIP.has(d))) continue;
+                  const ext = file.includes('.') ? file.split('.').pop().toLowerCase() : '';
+                  if (!ext || IGNORE.has(ext) || file.startsWith('.') || dirs.some(d => d.startsWith('.') || SKIP.has(d))) continue;
                   names.add(dirs.length ? dirs[0] : file);
                 }
                 const list = [...names];

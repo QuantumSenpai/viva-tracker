@@ -33,7 +33,7 @@ A simple tracker for viva sessions. It builds a checklist from the folders in ea
 ## Notes
 
 - Student repositories must be public, otherwise they are skipped.
-- Questions are detected automatically from code files (C, C++, Python, Java, JS, TS, Go, Rust and more). A folder containing code becomes one item, and a code file in the repo root becomes its own item.
+- Questions are detected automatically from any code file in any language, including odd extensions like `.c++`. Documents, images, archives, binaries and config files are ignored. A folder containing code becomes one item, and a code file in the repo root becomes its own item.
 - If all code sits inside a single parent folder, that folder is opened and its children are listed instead.
 - Folders like `node_modules`, `venv`, `build`, `dist` and dot folders are ignored.
 - Earlier ticks are kept in `progress.json`, so they are never lost when new folders are added.
