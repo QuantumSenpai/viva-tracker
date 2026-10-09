@@ -19,6 +19,26 @@
     "Q05-Array-InsertDelete": {
       "by": "QuantumSenpai",
       "at": "2026-10-09T06:26:47.291Z"
+    },
+    "Q06-Hashing": {
+      "by": "QuantumSenpai",
+      "at": "2026-10-09T06:27:41.417Z"
+    },
+    "Q07-LinearProbing": {
+      "by": "QuantumSenpai",
+      "at": "2026-10-09T06:27:41.417Z"
+    },
+    "Q08-QuadraticProbing": {
+      "by": "QuantumSenpai",
+      "at": "2026-10-09T06:27:41.417Z"
+    },
+    "Q09-SeparateChaining": {
+      "by": "QuantumSenpai",
+      "at": "2026-10-09T06:27:41.417Z"
+    },
+    "Q10-BinarySearch-2": {
+      "by": "QuantumSenpai",
+      "at": "2026-10-09T06:27:41.417Z"
     }
   }
 }
