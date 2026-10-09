@@ -21,6 +21,31 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const CODE = /\.(c|cpp|cc|cxx|h|hpp|py|ipynb|java|js|ts|go|rs|cs|kt|rb|php|sql)$/i;
+            const SKIP = new Set(['node_modules', 'venv', 'env', '__pycache__', 'build', 'dist', 'bin', 'obj', 'vendor', 'target', 'out']);
+            const pick = paths => {
+              let prefix = '';
+              for (let depth = 0; ; depth++) {
+                const names = new Set();
+                for (const p of paths) {
+                  if (!p.startsWith(prefix)) continue;
+                  const parts = p.slice(prefix.length).split('/');
+                  const dirs = parts.slice(0, -1);
+                  const file = parts[parts.length - 1];
+                  if (!CODE.test(file) || file.startsWith('.') || dirs.some(d => d.startsWith('.') || SKIP.has(d))) continue;
+                  names.add(dirs.length ? dirs[0] : file);
+                }
+                const list = [...names];
+                const onlyDir = list.length === 1 && paths.some(p => p.startsWith(prefix + list[0] + '/'));
+                if (onlyDir && depth < 2) {
+                  prefix += list[0] + '/';
+                  continue;
+                }
+                return list
+                  .sort((x, y) => x.localeCompare(y, undefined, { numeric: true }))
+                  .map(x => prefix + x);
+              }
+            };
             const render = (dirs, done) => {
               const n = dirs.filter(d => done.has(d)).length;
               const t = dirs.length;
@@ -34,17 +59,20 @@ jobs:
             const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 });
             for (const s of students) {
               const [owner, repo] = s.split('/');
-              let items;
+              let paths;
               try {
-                ({ data: items } = await github.rest.repos.getContent({ owner, repo, path: '' }));
+                const { data } = await github.rest.git.getTree({ owner, repo, tree_sha: 'HEAD', recursive: 'true' });
+                if (data.truncated) core.warning(`large repo, list may be partial: ${s}`);
+                paths = data.tree.filter(i => i.type === 'blob').map(i => i.path);
               } catch (e) {
                 core.warning(`skip ${s}`);
                 continue;
               }
-              const dirs = items
-                .filter(i => i.type === 'dir' && !i.name.startsWith('.'))
-                .map(i => i.name)
-                .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+              const dirs = pick(paths);
+              if (!dirs.length) {
+                core.warning(`no code found: ${s}`);
+                continue;
+              }
               const found = issues.find(i => i.title === s && !i.pull_request);
               const existing = found ? (await github.rest.issues.get({ ...context.repo, issue_number: found.number })).data : null;
               const done = new Set(Object.keys(log[s] || {}));

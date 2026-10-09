@@ -13,7 +13,7 @@ A simple tracker for viva sessions. It builds a checklist from the folders in ea
 **Student**
 1. Keep your repository public.
 2. Get your `username/repo` added to `students.txt`.
-3. New folders you push will appear in the checklist within 3 hours.
+3. New folders or code files you push will appear in the checklist within 15 minutes.
 
 ## Files
 
@@ -33,6 +33,8 @@ A simple tracker for viva sessions. It builds a checklist from the folders in ea
 ## Notes
 
 - Student repositories must be public, otherwise they are skipped.
-- Every top-level folder is listed as a question, except folders starting with a dot.
+- Questions are detected automatically from code files (C, C++, Python, Java, JS, TS, Go, Rust and more). A folder containing code becomes one item, and a code file in the repo root becomes its own item.
+- If all code sits inside a single parent folder, that folder is opened and its children are listed instead.
+- Folders like `node_modules`, `venv`, `build`, `dist` and dot folders are ignored.
 - Earlier ticks are kept in `progress.json`, so they are never lost when new folders are added.
 - Each tick is committed with a message like `username/repo: Q05 ticked by teacher at 12 Oct 2026, 11:43 AM IST`.
