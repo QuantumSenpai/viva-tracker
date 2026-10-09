@@ -1,21 +1,5 @@
 {
   "QuantumSenpai/Competitive-Programming-Lab": {
-    "Q03-BinarySearch": {
-      "by": "QuantumSenpai",
-      "at": "2026-10-09T06:18:04.312Z"
-    },
-    "Q04-EA-2D-RowMajor-DecBin": {
-      "by": "QuantumSenpai",
-      "at": "2026-10-09T06:26:47.291Z"
-    },
-    "Q05-Array-InsertDelete": {
-      "by": "QuantumSenpai",
-      "at": "2026-10-09T06:26:47.291Z"
-    },
-    "Q06-Hashing": {
-      "by": "QuantumSenpai",
-      "at": "2026-10-09T06:27:41.417Z"
-    },
     "Q07-LinearProbing": {
       "by": "QuantumSenpai",
       "at": "2026-10-09T06:27:41.417Z"
