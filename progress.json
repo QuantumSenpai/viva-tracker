@@ -1,13 +1,5 @@
 {
   "QuantumSenpai/Competitive-Programming-Lab": {
-    "Q01-EA-2D-RowMajor": {
-      "by": "QuantumSenpai",
-      "at": "2026-10-09T06:17:40.946Z"
-    },
-    "Q02-Offset-2D-RowMajor": {
-      "by": "QuantumSenpai",
-      "at": "2026-10-09T06:26:47.291Z"
-    },
     "Q03-BinarySearch": {
       "by": "QuantumSenpai",
       "at": "2026-10-09T06:18:04.312Z"
@@ -35,14 +27,6 @@
     "Q09-SeparateChaining": {
       "by": "QuantumSenpai",
       "at": "2026-10-09T06:27:41.417Z"
-    },
-    "Q10-BinarySearch-2": {
-      "by": "QuantumSenpai",
-      "at": "2026-10-09T06:27:41.417Z"
-    },
-    "Q11-ColumnMajorOrder": {
-      "by": "QuantumSenpai",
-      "at": "2026-10-09T06:29:42.098Z"
     }
   }
 }
