@@ -25,7 +25,8 @@ jobs:
             const IGNORE = new Set(['md', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'zip', 'rar', '7z', 'tar', 'gz', 'exe', 'out', 'o', 'obj', 'class', 'dll', 'so', 'a', 'lib', 'jar', 'log', 'yml', 'yaml', 'json', 'lock', 'toml', 'ini', 'cfg', 'gitignore', 'gitattributes']);
             const SKIP = new Set(['node_modules', 'venv', 'env', '__pycache__', 'build', 'dist', 'bin', 'obj', 'vendor', 'target', 'out']);
             const clean = s => s.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
-            const pick = paths => {
+            const NOEXT = new Set(['license', 'licence', 'readme', 'makefile', 'dockerfile', 'procfile', 'notice', 'authors', 'changelog', 'contributing', 'copying', 'cname', 'codeowners']);
+            const pick = (paths, loose) => {
               let prefix = '';
               for (let depth = 0; ; depth++) {
                 const names = new Set();
@@ -35,7 +36,8 @@ jobs:
                   const dirs = parts.slice(0, -1);
                   const file = parts[parts.length - 1];
                   const ext = file.includes('.') ? file.split('.').pop().toLowerCase() : '';
-                  if (!ext || IGNORE.has(ext) || file.startsWith('.') || dirs.some(d => d.startsWith('.') || SKIP.has(d))) continue;
+                  const isCode = ext ? !IGNORE.has(ext) : (loose && !NOEXT.has(file.toLowerCase()));
+                  if (!isCode || file.startsWith('.') || dirs.some(d => d.startsWith('.') || SKIP.has(d))) continue;
                   names.add(dirs.length ? dirs[0] : file);
                 }
                 const list = [...names];
@@ -62,7 +64,8 @@ jobs:
             const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 });
             for (const s of students) {
               const [owner, repo] = s.split('/');
-              let paths;
+              let paths = null;
+              let note = '';
               try {
                 const { data: info } = await github.rest.repos.get({ owner, repo });
                 const { data } = await github.rest.git.getTree({ owner, repo, tree_sha: info.default_branch, recursive: 'true' });
@@ -70,20 +73,25 @@ jobs:
                 paths = data.tree.filter(i => i.type === 'blob').map(i => i.path);
               } catch (e) {
                 core.warning(`skip ${s}: ${e.status} ${e.message}`);
-                continue;
+                note = `⚠️ Repository not reachable (${e.status}). It may be private, renamed, or the name in students.txt is wrong.`;
               }
-              const dirs = pick(paths);
-              if (!dirs.length) {
-                core.warning(`no code found: ${s}`);
-                continue;
+              let dirs = [];
+              if (paths) {
+                dirs = pick(paths, false);
+                if (!dirs.length) dirs = pick(paths, true);
+                if (!dirs.length) {
+                  core.warning(`no code found: ${s}`);
+                  note = '⚠️ No code files found in this repository yet.';
+                }
               }
               const found = issues.find(i => i.title === s && !i.pull_request);
+              if (!dirs.length && found) continue;
               const existing = found ? (await github.rest.issues.get({ ...context.repo, issue_number: found.number })).data : null;
               const done = new Set(Object.keys(log[s] || {}));
               if (existing && existing.body) {
                 for (const m of existing.body.matchAll(/- \[x\] (.+)/gi)) done.add(m[1].trim());
               }
-              const body = render(dirs, done);
+              const body = dirs.length ? render(dirs, done) : note;
               if (!existing) {
                 await github.rest.issues.create({ ...context.repo, title: s, body });
               } else if ((existing.body || '').replace(/\r\n/g, '\n') !== body) {
@@ -106,6 +114,7 @@ jobs:
             const now = new Date();
             const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: context.payload.issue.number });
             const lines = (issue.body || '').split('\n').map(l => l.replace(/\r$/, '')).filter(l => /^- \[[ x]\] /i.test(l));
+            if (!lines.length) return;
             const checked = lines.filter(l => /^- \[x\]/i.test(l)).map(l => l.replace(/^- \[x\] /i, '').trim());
             const t = lines.length;
             const n = checked.length;
