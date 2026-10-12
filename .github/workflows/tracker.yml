@@ -13,8 +13,11 @@ permissions:
 jobs:
   sync:
     if: github.event_name != 'issues'
-    concurrency: sync
+    concurrency:
+      group: sync
+      cancel-in-progress: false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/github-script@v7
@@ -24,21 +27,29 @@ jobs:
             const fs = require('fs');
             const IGNORE = new Set(['md', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'zip', 'rar', '7z', 'tar', 'gz', 'exe', 'out', 'o', 'obj', 'class', 'dll', 'so', 'a', 'lib', 'jar', 'log', 'yml', 'yaml', 'json', 'lock', 'toml', 'ini', 'cfg', 'gitignore', 'gitattributes']);
             const SKIP = new Set(['node_modules', 'venv', 'env', '__pycache__', 'build', 'dist', 'bin', 'obj', 'vendor', 'target', 'out']);
-            const clean = s => s.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
             const NOEXT = new Set(['license', 'licence', 'readme', 'makefile', 'dockerfile', 'procfile', 'notice', 'authors', 'changelog', 'contributing', 'copying', 'cname', 'codeowners']);
+            const MAX_KIDS = 40;
+            const tickRx = /^[ \t]*- \[x\] (.+)$/gim;
+            const clean = s => s.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+            const byName = (x, y) => x.localeCompare(y, undefined, { numeric: true });
+            const isCode = (p, loose) => {
+              const parts = p.split('/');
+              const dirs = parts.slice(0, -1);
+              const file = parts[parts.length - 1];
+              const ext = file.includes('.') ? file.split('.').pop().toLowerCase() : '';
+              const ok = ext ? !IGNORE.has(ext) : (loose && !NOEXT.has(file.toLowerCase()));
+              return ok && !file.startsWith('.') && !dirs.some(d => d.startsWith('.') || SKIP.has(d));
+            };
             const pick = (paths, loose) => {
               let prefix = '';
               for (let depth = 0; ; depth++) {
                 const names = new Set();
                 for (const p of paths) {
                   if (!p.startsWith(prefix)) continue;
-                  const parts = p.slice(prefix.length).split('/');
-                  const dirs = parts.slice(0, -1);
-                  const file = parts[parts.length - 1];
-                  const ext = file.includes('.') ? file.split('.').pop().toLowerCase() : '';
-                  const isCode = ext ? !IGNORE.has(ext) : (loose && !NOEXT.has(file.toLowerCase()));
-                  if (!isCode || file.startsWith('.') || dirs.some(d => d.startsWith('.') || SKIP.has(d))) continue;
-                  names.add(dirs.length ? dirs[0] : file);
+                  const rel = p.slice(prefix.length);
+                  if (!isCode(rel, loose)) continue;
+                  const parts = rel.split('/');
+                  names.add(parts.length > 1 ? parts[0] : rel);
                 }
                 const list = [...names];
                 const onlyDir = list.length === 1 && paths.some(p => p.startsWith(prefix + list[0] + '/'));
@@ -46,39 +57,45 @@ jobs:
                   prefix += list[0] + '/';
                   continue;
                 }
-                return list
-                  .sort((x, y) => x.localeCompare(y, undefined, { numeric: true }))
-                  .map(x => prefix + x);
+                return list.sort(byName).map(x => prefix + x);
               }
             };
-            const pickFiles = (paths, loose) => paths
-              .filter(p => {
-                const parts = p.split('/');
-                const dirs = parts.slice(0, -1);
-                const file = parts[parts.length - 1];
-                const ext = file.includes('.') ? file.split('.').pop().toLowerCase() : '';
-                const isCode = ext ? !IGNORE.has(ext) : (loose && !NOEXT.has(file.toLowerCase()));
-                return isCode && !file.startsWith('.') && !dirs.some(d => d.startsWith('.') || SKIP.has(d));
-              })
-              .sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
-            const render = (dirs, done) => {
-              const n = dirs.filter(d => done.has(d)).length;
-              const t = dirs.length;
+            const pickFiles = (paths, loose) => paths.filter(p => isCode(p, loose)).sort(byName);
+            const buildItems = (names, paths, loose, byFile) => names.map(name => {
+              if (byFile) return { name, children: [] };
+              const kids = paths.filter(p => p.startsWith(name + '/') && isCode(p, loose)).sort(byName);
+              return { name, children: kids.length > 1 && kids.length <= MAX_KIDS ? kids : [] };
+            });
+            const leavesOf = it => it.children.length ? it.children : [it.name];
+            const render = (items, done) => {
+              const all = items.flatMap(leavesOf);
+              const n = all.filter(x => done.has(x)).length;
+              const t = all.length;
               const p = t ? Math.round(n / t * 100) : 0;
               const bar = '█'.repeat(Math.round(p / 5)).padEnd(20, '░');
-              const list = dirs.map(d => `- [${done.has(d) ? 'x' : ' '}] ${d}`).join('\n');
+              const mk = v => v ? 'x' : ' ';
+              const list = items.flatMap(it => it.children.length
+                ? [`- [${mk(it.children.every(c => done.has(c)))}] ${it.name}`, ...it.children.map(c => `  - [${mk(done.has(c))}] ${c}`)]
+                : [`- [${mk(done.has(it.name))}] ${it.name}`]).join('\n');
               return `**${n} / ${t} done (${p}%)**\n\`${bar}\`\n\n${list}`;
             };
             const opts = {};
+            const seen = new Set();
             const students = fs.readFileSync('students.txt', 'utf8').split('\n').map(l => l.replace(/\r$/, '').trim()).filter(l => l && !l.startsWith('#')).map(l => {
               const [r, ...rest] = l.split(/\s+/);
               const s = clean(r);
               opts[s] = rest.map(x => x.toLowerCase());
               return s;
-            }).filter(s => /^[^\/\s]+\/[^\/\s]+$/.test(s));
+            }).filter(s => /^[^\/\s]+\/[^\/\s]+$/.test(s)).filter(s => {
+              const k = s.toLowerCase();
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            });
             const log = fs.existsSync('progress.json') ? JSON.parse(fs.readFileSync('progress.json', 'utf8')) : {};
-            const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 });
+            const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'all', per_page: 100 });
             for (const s of students) {
+              const key = s.toLowerCase();
               const [owner, repo] = s.split('/');
               let paths = null;
               let note = '';
@@ -91,27 +108,55 @@ jobs:
                 core.warning(`skip ${s}: ${e.status} ${e.message}`);
                 note = `⚠️ Repository not reachable (${e.status}). It may be private, renamed, or the name in students.txt is wrong.`;
               }
-              let dirs = [];
+              let items = [];
               if (paths) {
                 const byFile = (opts[s] || []).includes('files');
-                const find = loose => byFile ? pickFiles(paths, loose) : pick(paths, loose);
-                dirs = find(false);
-                if (!dirs.length) dirs = find(true);
-                if (!dirs.length) {
+                const find = l => byFile ? pickFiles(paths, l) : pick(paths, l);
+                let loose = false;
+                let names = find(false);
+                if (!names.length) {
+                  loose = true;
+                  names = find(true);
+                }
+                items = buildItems(names, paths, loose, byFile);
+                if (!items.length) {
                   core.warning(`no code found: ${s}`);
                   note = '⚠️ No code files found in this repository yet.';
                 }
               }
-              const found = issues.find(i => i.title === s && !i.pull_request);
-              if (!dirs.length && found) continue;
-              const existing = found ? (await github.rest.issues.get({ ...context.repo, issue_number: found.number })).data : null;
-              const done = new Set(Object.keys(log[s] || {}));
-              if (existing && existing.body) {
-                for (const m of existing.body.matchAll(/- \[x\] (.+)/gi)) done.add(m[1].trim());
+              const parents = new Set(items.filter(it => it.children.length).map(it => it.name));
+              const matches = issues.filter(i => !i.pull_request && i.title.trim().toLowerCase() === key).sort((a, b) => a.number - b.number);
+              const primary = matches.find(i => i.state === 'open') || matches[0];
+              const extras = matches.filter(i => i !== primary && i.state === 'open');
+              const done = new Set();
+              for (const k of Object.keys(log)) {
+                if (k.toLowerCase() === key) Object.keys(log[k]).forEach(q => done.add(q));
               }
-              const body = dirs.length ? render(dirs, done) : note;
+              for (const d of extras) {
+                for (const m of (d.body || '').matchAll(tickRx)) {
+                  const q = m[1].trim();
+                  if (!parents.has(q)) done.add(q);
+                }
+                await github.rest.issues.createComment({ ...context.repo, issue_number: d.number, body: `Duplicate of #${primary.number}, closing.` });
+                await github.rest.issues.update({ ...context.repo, issue_number: d.number, state: 'closed', state_reason: 'not_planned' });
+                d.state = 'closed';
+              }
+              if (!items.length && primary) continue;
+              const existing = primary ? (await github.rest.issues.get({ ...context.repo, issue_number: primary.number })).data : null;
+              if (existing && existing.body) {
+                for (const m of existing.body.matchAll(tickRx)) {
+                  const q = m[1].trim();
+                  if (!parents.has(q)) done.add(q);
+                }
+              }
+              for (const it of items) {
+                if (it.children.length && done.has(it.name)) it.children.forEach(c => done.add(c));
+              }
+              let body = items.length ? render(items, done) : note;
+              if (body.length > 60000) body = render(items.map(it => ({ name: it.name, children: [] })), done);
               if (!existing) {
-                await github.rest.issues.create({ ...context.repo, title: s, body });
+                const { data } = await github.rest.issues.create({ ...context.repo, title: s, body });
+                issues.push(data);
               } else if ((existing.body || '').replace(/\r\n/g, '\n') !== body) {
                 await github.rest.issues.update({ ...context.repo, issue_number: existing.number, body });
               }
@@ -131,22 +176,27 @@ jobs:
             const who = context.payload.sender.login;
             const now = new Date();
             const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: context.payload.issue.number });
-            const lines = (issue.body || '').split('\n').map(l => l.replace(/\r$/, '')).filter(l => /^- \[[ x]\] /i.test(l));
-            if (!lines.length) return;
-            const checked = lines.filter(l => /^- \[x\]/i.test(l)).map(l => l.replace(/^- \[x\] /i, '').trim());
-            const t = lines.length;
-            const n = checked.length;
-            const p = t ? Math.round(n / t * 100) : 0;
-            const bar = '█'.repeat(Math.round(p / 5)).padEnd(20, '░');
-            const body = `**${n} / ${t} done (${p}%)**\n\`${bar}\`\n\n${lines.join('\n')}`;
-            if (body !== (issue.body || '').replace(/\r\n/g, '\n')) {
-              await github.rest.issues.update({ ...context.repo, issue_number: issue.number, body });
+            const rx = /^(\s*)- \[([ xX])\] (.+)$/;
+            const tree = [];
+            for (const raw of (issue.body || '').split('\n')) {
+              const m = raw.replace(/\r$/, '').match(rx);
+              if (!m) continue;
+              const node = { text: m[3].trim(), checked: m[2].toLowerCase() === 'x' };
+              if (m[1].length > 0 && tree.length) tree[tree.length - 1].children.push(node);
+              else tree.push({ ...node, children: [] });
             }
+            if (!tree.length) return;
+            const leaves = tree.flatMap(x => x.children.length ? x.children : [x]).map(x => x.text);
+            const leafSet = new Set(leaves);
+            const t = leaves.length;
+            const mk = v => v ? 'x' : ' ';
+            const fmt = a => a.length > 3 ? `${a.slice(0, 3).join(', ')} +${a.length - 3} more` : a.join(', ');
             const ist = now.toLocaleString('en-IN', {
               timeZone: 'Asia/Kolkata',
               day: '2-digit', month: 'short', year: 'numeric',
               hour: '2-digit', minute: '2-digit', hour12: true
             });
+            let bodyNow = (issue.body || '').replace(/\r\n/g, '\n');
             for (let i = 0; i < 3; i++) {
               let sha;
               let log = {};
@@ -156,15 +206,46 @@ jobs:
                 log = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'));
               } catch (e) {}
               const cur = log[key] || {};
-              const added = checked.filter(q => !cur[q]);
-              const removed = Object.keys(cur).filter(q => !checked.includes(q));
+              const norm = {};
+              for (const [k, v] of Object.entries(cur)) {
+                const par = tree.find(x => x.children.length && x.text === k);
+                if (par) par.children.forEach(c => { if (!norm[c.text]) norm[c.text] = v; });
+                else norm[k] = v;
+              }
+              const checked = new Set();
+              for (const x of tree) {
+                if (!x.children.length) {
+                  if (x.checked) checked.add(x.text);
+                  continue;
+                }
+                const prevAll = x.children.every(c => norm[c.text]);
+                const allNow = x.children.every(c => c.checked);
+                let kids = x.children.filter(c => c.checked);
+                if (x.checked && !allNow && !prevAll) kids = x.children;
+                else if (!x.checked && allNow && prevAll) kids = [];
+                kids.forEach(c => checked.add(c.text));
+              }
+              const n = leaves.filter(q => checked.has(q)).length;
+              const p = t ? Math.round(n / t * 100) : 0;
+              const bar = '█'.repeat(Math.round(p / 5)).padEnd(20, '░');
+              const lines = tree.flatMap(x => x.children.length
+                ? [`- [${mk(x.children.every(c => checked.has(c.text)))}] ${x.text}`, ...x.children.map(c => `  - [${mk(checked.has(c.text))}] ${c.text}`)]
+                : [`- [${mk(checked.has(x.text))}] ${x.text}`]);
+              const body = `**${n} / ${t} done (${p}%)**\n\`${bar}\`\n\n${lines.join('\n')}`;
+              if (body !== bodyNow) {
+                await github.rest.issues.update({ ...context.repo, issue_number: issue.number, body });
+                bodyNow = body;
+              }
+              const added = leaves.filter(q => checked.has(q) && !norm[q]);
+              const removed = leaves.filter(q => !checked.has(q) && norm[q]);
               if (!added.length && !removed.length) return;
               const next = {};
-              for (const q of checked) next[q] = cur[q] || { by: who, at: now.toISOString() };
+              for (const [q, v] of Object.entries(norm)) if (!leafSet.has(q)) next[q] = v;
+              for (const q of leaves) if (checked.has(q)) next[q] = norm[q] || { by: who, at: now.toISOString() };
               log[key] = next;
               const parts = [];
-              if (added.length) parts.push(added.join(', ') + ' ticked');
-              if (removed.length) parts.push(removed.join(', ') + ' unticked');
+              if (added.length) parts.push(fmt(added) + ' ticked');
+              if (removed.length) parts.push(fmt(removed) + ' unticked');
               try {
                 await github.rest.repos.createOrUpdateFileContents({
                   ...context.repo,
@@ -178,3 +259,4 @@ jobs:
                 if (e.status !== 409 && e.status !== 422) throw e;
               }
             }
+            core.warning('progress.json update failed after retries');
