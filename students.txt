@@ -7,3 +7,4 @@ snehadas24062006-hue/Competitive-Programming-Lab-Problems
 raktim-bera/Competitive-Programming
 srija-112/competitive-programming
 Rudra-1612/Competitive-Programming-Lab
+sristipriya449-source/CP-Solutions-C
