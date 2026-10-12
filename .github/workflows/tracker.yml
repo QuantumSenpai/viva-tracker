@@ -51,6 +51,16 @@ jobs:
                   .map(x => prefix + x);
               }
             };
+            const pickFiles = (paths, loose) => paths
+              .filter(p => {
+                const parts = p.split('/');
+                const dirs = parts.slice(0, -1);
+                const file = parts[parts.length - 1];
+                const ext = file.includes('.') ? file.split('.').pop().toLowerCase() : '';
+                const isCode = ext ? !IGNORE.has(ext) : (loose && !NOEXT.has(file.toLowerCase()));
+                return isCode && !file.startsWith('.') && !dirs.some(d => d.startsWith('.') || SKIP.has(d));
+              })
+              .sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
             const render = (dirs, done) => {
               const n = dirs.filter(d => done.has(d)).length;
               const t = dirs.length;
@@ -59,7 +69,13 @@ jobs:
               const list = dirs.map(d => `- [${done.has(d) ? 'x' : ' '}] ${d}`).join('\n');
               return `**${n} / ${t} done (${p}%)**\n\`${bar}\`\n\n${list}`;
             };
-            const students = fs.readFileSync('students.txt', 'utf8').split('\n').map(s => s.replace(/\r$/, '').trim()).filter(s => s && !s.startsWith('#')).map(clean).filter(s => /^[^\/\s]+\/[^\/\s]+$/.test(s));
+            const opts = {};
+            const students = fs.readFileSync('students.txt', 'utf8').split('\n').map(l => l.replace(/\r$/, '').trim()).filter(l => l && !l.startsWith('#')).map(l => {
+              const [r, ...rest] = l.split(/\s+/);
+              const s = clean(r);
+              opts[s] = rest.map(x => x.toLowerCase());
+              return s;
+            }).filter(s => /^[^\/\s]+\/[^\/\s]+$/.test(s));
             const log = fs.existsSync('progress.json') ? JSON.parse(fs.readFileSync('progress.json', 'utf8')) : {};
             const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 });
             for (const s of students) {
@@ -77,8 +93,10 @@ jobs:
               }
               let dirs = [];
               if (paths) {
-                dirs = pick(paths, false);
-                if (!dirs.length) dirs = pick(paths, true);
+                const byFile = (opts[s] || []).includes('files');
+                const find = loose => byFile ? pickFiles(paths, loose) : pick(paths, loose);
+                dirs = find(false);
+                if (!dirs.length) dirs = find(true);
                 if (!dirs.length) {
                   core.warning(`no code found: ${s}`);
                   note = '⚠️ No code files found in this repository yet.';
